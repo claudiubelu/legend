@@ -1,0 +1,64 @@
+name: Publish Juju Legend
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+       - master
+    types:
+       - closed
+    paths:
+       - 'releases/**'
+
+jobs:
+  publish-images:
+    #if: github.event.pull_request.merged == true
+    name: Publish Charm images
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Install Docker
+      - uses: docker-practice/actions-setup-docker@master
+
+      - name: Install Dependencies
+        run: |
+          sudo snap install jq
+          sudo snap install charmcraft --classic
+
+      - name: Upload Docker images to Charmhub
+        run: |
+          set -x
+          # Get the release files from the last commit.
+
+          for release in $(git diff --name-only --no merges | grep 'manifest.json')
+          do
+            echo "Treating ${release}..."
+            # Getting the release versions.
+            studio_version=`cat ./releases/2021-10-18/manifest.json | jq '.core."finos/legend-studio"'`
+            engine_version=`cat ./releases/2021-10-18/manifest.json | jq '.core."finos/legend-engine-server"'`
+            sdlc_version=`cat ./releases/2021-10-18/manifest.json | jq '.core."finos/legend-sdlc-server"'`
+
+            studio_image="finos/legend-studio:${studio_version}"
+            engine_image="finos/legend-engine-server:${engine_version}"
+            sdlc_image="finos/legend-sdlc-server:${sdlc_version}"
+
+            # Pulling the images.
+            docker pull "${studio_image}"
+            docker pull "${engine_image}"
+            docker pull "${sdlc_image}"
+
+            # Get the image SHAs.
+            studio_sha="$(docker inspect ${studio_image} | jq '.[0].Id')"
+            engine_sha="$(docker inspect ${engine_image} | jq '.[0].Id')"
+            sdlc_sha="$(docker inspect ${sdlc_image} | jq '.[0].Id')"
+
+            # Upload images to Charmhub. CHARMCRAFT_AUTH should be loaded in the environment, and
+            # it should have sufficient permissions to push the resources.
+            charmcraft upload-resource finos-legend-studio-k8s studio-image --image="${studio_sha}"
+            charmcraft upload-resource finos-legend-engine-k8s engine-image --image="${engine_sha}"
+            charmcraft upload-resource finos-legend-sdlc-k8s sdlc-image --image="${sdlc_sha}"
+          done
